@@ -33,8 +33,10 @@ services:
     command: >
       sh -c "
       scripts/wait-for-db.sh &&
-      echo 'Orders service booted successfully'
+      uvicorn services.orders.app.main:app --host 0.0.0.0 --port 8000
       "
+    ports:
+      - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
