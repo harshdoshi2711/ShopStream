@@ -9,3 +9,4 @@ python-dotenv
 pydantic-settings
 jinja2
 httpx
+python-multipart

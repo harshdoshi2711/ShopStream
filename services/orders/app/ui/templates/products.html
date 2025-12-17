@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ShopStream – Products</title>
+</head>
+<body>
+<h1>Products</h1>
+
+<ul>
+{% for product in products %}
+    <li>
+        {{ product.name }} —
+        ₹{{ product.price }} —
+        Stock: {{ product.stock }}
+
+        <form method="post" action="/ui/order">
+            <input type="hidden" name="product_id" value="{{ product.id }}">
+            <input type="number" name="quantity" value="1" min="1">
+            <button type="submit">Order</button>
+        </form>
+    </li>
+{% endfor %}
+</ul>
+
+</body>
+</html>

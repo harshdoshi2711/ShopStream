@@ -30,6 +30,8 @@ services:
     container_name: shopstream-orders
     env_file:
       - .env
+    environment:
+      PYTHONPATH: /app
     command: >
       sh -c "
       scripts/wait-for-db.sh &&
