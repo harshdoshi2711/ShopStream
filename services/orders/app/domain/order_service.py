@@ -1,6 +1,7 @@
 # services/orders/app/domain/order_service.py
 
 from sqlalchemy.orm import Session
+import json
 
 from services.orders.app.models.order import Order
 from services.orders.app.models.product import Product
@@ -29,7 +30,7 @@ def create_order_with_outbox(
     )
 
     db.add(order)
-    db.flush()  # ensures order.id
+    db.flush()  # ensures order.id is available
 
     event = OrderCreatedEvent(
         order_id=order.id,
@@ -38,9 +39,17 @@ def create_order_with_outbox(
         total_price=float(total_price),
     )
 
+    # 🔑 SERIALIZATION BOUNDARY (THIS IS THE KEY LINE)
+    payload = json.dumps({
+        "order_id": event.order_id,
+        "product_id": event.product_id,
+        "quantity": event.quantity,
+        "total_price": event.total_price,
+    })
+
     outbox = OutboxEvent(
         event_type="OrderCreated",
-        payload=event.__dict__,
+        payload=payload,   # ✅ JSON STRING
     )
 
     db.add(outbox)
