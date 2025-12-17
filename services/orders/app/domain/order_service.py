@@ -17,8 +17,8 @@ def create_order_with_outbox(
 ) -> Order:
     product = db.query(Product).filter(Product.id == product_id).first()
 
-    if not product or product.stock < quantity:
-        raise ValueError("Product unavailable")
+    if not product:
+        raise ValueError("Invalid product")
 
     total_price = product.price * quantity
 
