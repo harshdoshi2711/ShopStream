@@ -45,5 +45,20 @@ services:
       redis:
         condition: service_healthy
 
+  outbox-publisher:
+    build: .
+    container_name: shopstream-outbox-publisher
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /app
+    command: python workers/outbox_publisher.py
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+
 volumes:
   postgres_data:
