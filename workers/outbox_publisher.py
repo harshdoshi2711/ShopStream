@@ -1,10 +1,9 @@
-# workers/outbox_publisher.py
-
 import time
 import logging
+import json
 
 from common.database.session import SessionLocal
-from common.messaging.redis_client import get_redis_client
+from common.messaging.redis_streams import publish_event
 from services.orders.app.models.outbox import OutboxEvent
 
 logging.basicConfig(level=logging.INFO)
@@ -15,7 +14,6 @@ STREAM_NAME = "order_events"
 
 def publish_events():
     db = SessionLocal()
-    redis = get_redis_client()
 
     events = (
         db.query(OutboxEvent)
@@ -26,13 +24,21 @@ def publish_events():
     )
 
     for event in events:
-        redis.xadd(
+        # 🔒 Normalize payload (handles legacy rows safely)
+        payload = (
+            event.payload
+            if isinstance(event.payload, dict)
+            else json.loads(event.payload)
+        )
+
+        publish_event(
             STREAM_NAME,
             {
                 "type": event.event_type,
-                "payload": str(event.payload),
+                **payload,
             },
         )
+
         event.status = "PUBLISHED"
         db.add(event)
 
