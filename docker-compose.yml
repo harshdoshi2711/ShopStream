@@ -73,6 +73,20 @@ services:
       redis:
         condition: service_healthy
 
+  orders-consumer:
+    build: .
+    container_name: shopstream-orders-consumer
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /app
+    command: python services/orders/app/consumer.py
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
 
 volumes:
   postgres_data:
