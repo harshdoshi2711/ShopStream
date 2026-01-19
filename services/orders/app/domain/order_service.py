@@ -1,12 +1,15 @@
 # services/orders/app/domain/order_service.py
 
-from sqlalchemy.orm import Session
+import logging
 import json
+from sqlalchemy.orm import Session
 
 from services.orders.app.models.order import Order
 from services.orders.app.models.product import Product
 from services.orders.app.models.outbox import OutboxEvent
 from common.events.order_events import OrderCreatedEvent
+
+logger = logging.getLogger("shopstream.orders")
 
 
 def create_order_with_outbox(
@@ -15,9 +18,21 @@ def create_order_with_outbox(
     product_id: int,
     quantity: int,
 ) -> Order:
+    logger.info(
+        "Create order requested",
+        extra={
+            "product_id": product_id,
+            "quantity": quantity,
+        },
+    )
+
     product = db.query(Product).filter(Product.id == product_id).first()
 
     if not product:
+        logger.warning(
+            "Order rejected: invalid product",
+            extra={"product_id": product_id},
+        )
         raise ValueError("Invalid product")
 
     total_price = product.price * quantity
@@ -49,10 +64,18 @@ def create_order_with_outbox(
 
     outbox = OutboxEvent(
         event_type="OrderCreated",
-        payload=payload,   # ✅ JSON STRING
+        payload=payload,
     )
 
     db.add(outbox)
     db.commit()
+
+    logger.info(
+        "Order persisted and outbox event created",
+        extra={
+            "order_id": order.id,
+            "product_id": product_id,
+        },
+    )
 
     return order
