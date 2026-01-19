@@ -2,6 +2,7 @@
 
 import logging
 import json
+import uuid
 from sqlalchemy.orm import Session
 
 from services.orders.app.models.order import Order
@@ -18,9 +19,13 @@ def create_order_with_outbox(
     product_id: int,
     quantity: int,
 ) -> Order:
+    # Correlation ID generated ONCE per order
+    correlation_id = str(uuid.uuid4())
+
     logger.info(
         "Create order requested",
         extra={
+            "correlation_id": correlation_id,
             "product_id": product_id,
             "quantity": quantity,
         },
@@ -31,7 +36,10 @@ def create_order_with_outbox(
     if not product:
         logger.warning(
             "Order rejected: invalid product",
-            extra={"product_id": product_id},
+            extra={
+                "correlation_id": correlation_id,
+                "product_id": product_id,
+            },
         )
         raise ValueError("Invalid product")
 
@@ -54,8 +62,10 @@ def create_order_with_outbox(
         total_price=float(total_price),
     )
 
-    # 🔑 SERIALIZATION BOUNDARY (THIS IS THE KEY LINE)
+    # 🔑 SERIALIZATION BOUNDARY
+    # Payload is JSON STRING (by design)
     payload = json.dumps({
+        "correlation_id": correlation_id,
         "order_id": event.order_id,
         "product_id": event.product_id,
         "quantity": event.quantity,
@@ -73,6 +83,7 @@ def create_order_with_outbox(
     logger.info(
         "Order persisted and outbox event created",
         extra={
+            "correlation_id": correlation_id,
             "order_id": order.id,
             "product_id": product_id,
         },
