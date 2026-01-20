@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from common.database.session import get_db
 from services.orders.app.models.product import Product
+from services.orders.app.models.order import Order
 from services.orders.app.domain.order_service import create_order_with_outbox
 
 router = APIRouter(prefix="/ui", tags=["ui"])
@@ -13,9 +14,9 @@ router = APIRouter(prefix="/ui", tags=["ui"])
 
 @router.get("/products")
 def list_products(request: Request, db: Session = Depends(get_db)):
-    products = db.query(Product).all()
+    products = db.query(Product).order_by(Product.id).all()
+    orders = db.query(Order).order_by(Order.id.desc()).all()
 
-    # Lazy import to avoid circular issues
     from fastapi.templating import Jinja2Templates
     templates = Jinja2Templates(directory="services/orders/app/ui/templates")
 
@@ -24,6 +25,7 @@ def list_products(request: Request, db: Session = Depends(get_db)):
         {
             "request": request,
             "products": products,
+            "orders": orders,
         },
     )
 
@@ -41,13 +43,11 @@ def create_order(
             quantity=quantity,
         )
     except ValueError:
-        # Redirect back with no crash
         return RedirectResponse(
             url="/ui/products",
             status_code=303,
         )
 
-    # Success → redirect back to products
     return RedirectResponse(
         url="/ui/products",
         status_code=303,

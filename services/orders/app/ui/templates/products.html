@@ -4,23 +4,53 @@
     <title>ShopStream – Products</title>
 </head>
 <body>
+
 <h1>Products</h1>
 
 <ul>
 {% for product in products %}
     <li>
-        {{ product.name }} —
-        ₹{{ product.price }} —
-        Stock: {{ product.stock }}
+        <strong>{{ product.name }}</strong><br>
+        Price: ₹{{ product.price }}<br>
+        Product ID: {{ product.id }}
 
-        <form method="post" action="/ui/order">
+        <form method="post" action="/ui/order" style="margin-top: 5px;">
             <input type="hidden" name="product_id" value="{{ product.id }}">
             <input type="number" name="quantity" value="1" min="1">
-            <button type="submit">Order</button>
+            <button type="submit">Place Order</button>
         </form>
     </li>
 {% endfor %}
 </ul>
+
+<hr>
+
+<h2>Orders</h2>
+
+{% if orders %}
+    <table border="1" cellpadding="6" cellspacing="0">
+        <thead>
+            <tr>
+                <th>Order ID</th>
+                <th>Product ID</th>
+                <th>Quantity</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for order in orders %}
+            <tr>
+                <td>{{ order.id }}</td>
+                <td>{{ order.product_id }}</td>
+                <td>{{ order.quantity }}</td>
+                <td><strong>{{ order.status }}</strong></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>No orders yet.</p>
+{% endif %}
 
 </body>
 </html>
