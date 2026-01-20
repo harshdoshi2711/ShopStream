@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from common.database.session import get_db
 from services.orders.app.models.product import Product
 from services.orders.app.models.order import Order
+from services.inventory.app.models.inventory import Inventory
 from services.orders.app.domain.order_service import create_order_with_outbox
 
 router = APIRouter(prefix="/ui", tags=["ui"])
@@ -17,6 +18,12 @@ def list_products(request: Request, db: Session = Depends(get_db)):
     products = db.query(Product).order_by(Product.id).all()
     orders = db.query(Order).order_by(Order.id.desc()).all()
 
+    # Build inventory lookup (product_id → stock)
+    inventory_rows = db.query(Inventory).all()
+    inventory_by_product_id = {
+        row.product_id: row.stock for row in inventory_rows
+    }
+
     from fastapi.templating import Jinja2Templates
     templates = Jinja2Templates(directory="services/orders/app/ui/templates")
 
@@ -26,6 +33,7 @@ def list_products(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "products": products,
             "orders": orders,
+            "inventory": inventory_by_product_id,
         },
     )
 
