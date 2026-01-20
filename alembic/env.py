@@ -5,6 +5,8 @@ from services.orders.app.models.product import Product
 from services.orders.app.models.order import Order
 from services.orders.app.models.outbox import OutboxEvent
 from services.inventory.app.models.inventory import Inventory
+from services.inventory.app.models.processed_event import InventoryProcessedEvent
+
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
