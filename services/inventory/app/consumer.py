@@ -10,6 +10,7 @@ from common.database.session import SessionLocal
 from services.inventory.app.models.inventory import Inventory
 from common.messaging.redis_streams import publish_event
 from common.config.logging import configure_logging
+from services.inventory.app.models.processed_event import InventoryProcessedEvent
 
 
 configure_logging()
@@ -112,15 +113,40 @@ def run():
 
         for _, entries in messages:
             for message_id, fields in entries:
-                payload = json.loads(fields["payload"])  # ✅ NOW VALID JSON
+                payload = json.loads(fields["payload"])
+                event_id = message_id  # Redis Stream ID
 
                 db = SessionLocal()
                 try:
+                    # 🔐 Idempotency check
+                    already_processed = (
+                        db.query(InventoryProcessedEvent)
+                        .filter_by(event_id=event_id)
+                        .first()
+                    )
+
+                    if already_processed:
+                        logger.info(
+                            "Duplicate inventory event ignored",
+                            extra={
+                                "correlation_id": payload.get("correlation_id", "-"),
+                                "event_id": event_id,
+                            },
+                        )
+                        redis_client.xack(STREAM_NAME, GROUP_NAME, message_id)
+                        continue
+
+                    # Normal processing
                     process_order_created(payload, db)
+
+                    # Record successful processing
+                    db.add(InventoryProcessedEvent(event_id=event_id))
+                    db.commit()
+
                     redis_client.xack(STREAM_NAME, GROUP_NAME, message_id)
+
                 finally:
                     db.close()
-
 
 if __name__ == "__main__":
     run()
