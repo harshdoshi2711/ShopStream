@@ -2,12 +2,18 @@
 
 import json
 import redis
+import logging
 
 from sqlalchemy.orm import Session
 
 from common.database.session import SessionLocal
 from services.inventory.app.models.inventory import Inventory
 from common.messaging.redis_streams import publish_event
+from common.config.logging import configure_logging
+
+
+configure_logging()
+logger = logging.getLogger("shopstream.inventory")
 
 STREAM_NAME = "order_events"
 GROUP_NAME = "inventory_group"
@@ -15,17 +21,38 @@ CONSUMER_NAME = "inventory_1"
 
 
 def process_order_created(payload: dict, db: Session):
+    correlation_id = payload.get("correlation_id", "-")
     order_id = payload["order_id"]
     product_id = payload["product_id"]
     quantity = payload["quantity"]
 
+    logger.info(
+        "Inventory check started",
+        extra={
+            "correlation_id": correlation_id,
+            "order_id": order_id,
+            "product_id": product_id,
+            "quantity": quantity,
+        },
+    )
+
     inventory = db.query(Inventory).filter_by(product_id=product_id).first()
 
     if not inventory or inventory.stock < quantity:
+        logger.warning(
+            "Inventory insufficient",
+            extra={
+                "correlation_id": correlation_id,
+                "order_id": order_id,
+                "product_id": product_id,
+            },
+        )
+
         publish_event(
             "inventory_events",
             {
                 "type": "InventoryFailed",
+                "correlation_id": correlation_id,
                 "order_id": order_id,
                 "product_id": product_id,
                 "reason": "Insufficient stock",
@@ -35,6 +62,16 @@ def process_order_created(payload: dict, db: Session):
 
     inventory.stock -= quantity
     db.commit()
+
+    logger.info(
+        "Inventory reserved",
+        extra={
+            "correlation_id": correlation_id,
+            "order_id": order_id,
+            "product_id": product_id,
+            "remaining_stock": inventory.stock,
+        },
+    )
 
     publish_event(
         "inventory_events",
