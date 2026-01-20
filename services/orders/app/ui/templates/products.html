@@ -11,8 +11,7 @@
 {% for product in products %}
     <li>
         <strong>{{ product.name }}</strong><br>
-        Price: ₹{{ product.price }}<br>
-        Product ID: {{ product.id }}
+        Product ID: {{ product.id }} | Price: ₹{{ product.price }}
 
         <form method="post" action="/ui/order" style="margin-top: 5px;">
             <input type="hidden" name="product_id" value="{{ product.id }}">

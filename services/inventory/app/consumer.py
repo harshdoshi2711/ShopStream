@@ -78,6 +78,7 @@ def process_order_created(payload: dict, db: Session):
         "inventory_events",
         {
             "type": "InventoryReserved",
+            "correlation_id": correlation_id,
             "order_id": order_id,
             "product_id": product_id,
             "quantity": quantity,
@@ -140,7 +141,13 @@ def run():
                     process_order_created(payload, db)
 
                     # Record successful processing
-                    db.add(InventoryProcessedEvent(event_id=event_id))
+                    db.add(
+                        InventoryProcessedEvent(
+                            event_id=event_id,
+                            order_id=payload["order_id"],
+                            correlation_id=payload.get("correlation_id"),
+                        )
+                    )
                     db.commit()
 
                     redis_client.xack(STREAM_NAME, GROUP_NAME, message_id)
