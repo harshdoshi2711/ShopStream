@@ -87,6 +87,18 @@ services:
       postgres:
         condition: service_healthy
 
+  payments:
+    build: .
+    container_name: shopstream-payments
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /app
+    command: python services/payments/app/consumer.py
+    depends_on:
+      redis:
+        condition: service_healthy
+
 
 volumes:
   postgres_data:
