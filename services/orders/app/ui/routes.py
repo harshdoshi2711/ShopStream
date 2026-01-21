@@ -19,7 +19,6 @@ def list_products(request: Request, db: Session = Depends(get_db)):
     products = db.query(Product).order_by(Product.id).all()
     orders = db.query(Order).order_by(Order.id.desc()).all()
 
-    # Build inventory lookup (product_id → stock)
     inventory_rows = db.query(Inventory).all()
     inventory_by_product_id = {
         row.product_id: row.stock for row in inventory_rows
@@ -68,13 +67,12 @@ def pay_order(
         return RedirectResponse(url="/ui/products", status_code=303)
 
     publish_event(
-        "payment_events",
+        "payment_commands",
         {
-            "type": "PaymentAttempted",
+            "type": "PaymentRequested",
             "correlation_id": f"order-{order.id}",
             "order_id": order.id,
             "amount_paid": amount_paid,
-            "expected_amount": float(order.total_price),
         },
     )
 

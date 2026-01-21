@@ -24,13 +24,13 @@ CONSUMER_NAME = "inventory_1"
 
 
 def process_order_created(payload: dict, db: Session):
-    correlation_id = payload.get("correlation_id", "-")
     order_id = payload["order_id"]
     product_id = payload["product_id"]
     quantity = payload["quantity"]
+    correlation_id = payload.get("correlation_id", "-")
 
     logger.info(
-        "Inventory check started",
+        "Processing OrderCreated",
         extra={
             "correlation_id": correlation_id,
             "order_id": order_id,
@@ -48,7 +48,6 @@ def process_order_created(payload: dict, db: Session):
                 "correlation_id": correlation_id,
                 "order_id": order_id,
                 "product_id": product_id,
-                "available_stock": inventory.stock if inventory else None,
             },
         )
 
@@ -90,13 +89,13 @@ def process_order_created(payload: dict, db: Session):
 
 
 def process_inventory_release(payload: dict, db: Session):
-    correlation_id = payload.get("correlation_id", "-")
     order_id = payload["order_id"]
     product_id = payload["product_id"]
     quantity = payload["quantity"]
+    correlation_id = payload.get("correlation_id", "-")
 
     logger.info(
-        "Inventory release requested",
+        "Processing InventoryReleaseRequested",
         extra={
             "correlation_id": correlation_id,
             "order_id": order_id,
@@ -108,7 +107,7 @@ def process_inventory_release(payload: dict, db: Session):
     inventory = db.query(Inventory).filter_by(product_id=product_id).first()
     if not inventory:
         logger.error(
-            "Inventory release failed — product not found",
+            "Inventory record not found during release",
             extra={
                 "correlation_id": correlation_id,
                 "order_id": order_id,
@@ -130,7 +129,6 @@ def process_inventory_release(payload: dict, db: Session):
         },
     )
 
-    # 🔴 CRITICAL FIX: emit terminal event
     publish_event(
         INVENTORY_EVENTS_STREAM,
         {
@@ -144,11 +142,7 @@ def process_inventory_release(payload: dict, db: Session):
 
 
 def run():
-    redis_client = redis.Redis(
-        host="redis",
-        port=6379,
-        decode_responses=True,
-    )
+    redis_client = redis.Redis(host="redis", port=6379, decode_responses=True)
 
     for stream in (ORDER_STREAM, INVENTORY_COMMANDS_STREAM):
         try:
@@ -156,7 +150,7 @@ def run():
         except redis.exceptions.ResponseError:
             pass
 
-    logger.info("Inventory service started", extra={"correlation_id": "-"})
+    logger.info("Inventory consumer started", extra={"correlation_id": "-"})
 
     while True:
         messages = redis_client.xreadgroup(
@@ -176,30 +170,21 @@ def run():
         for stream_name, entries in messages:
             for message_id, fields in entries:
                 payload = json.loads(fields["payload"])
-
                 db = SessionLocal()
                 try:
-                    already_processed = (
+                    if (
                         db.query(InventoryProcessedEvent)
-                        .filter_by(
-                            stream_name=stream_name,
-                            event_id=message_id,
-                        )
+                        .filter_by(stream_name=stream_name, event_id=message_id)
                         .first()
-                    )
-
-                    if already_processed:
+                    ):
                         redis_client.xack(stream_name, GROUP_NAME, message_id)
                         continue
 
                     if stream_name == ORDER_STREAM:
                         process_order_created(payload, db)
-
-                    elif (
-                        stream_name == INVENTORY_COMMANDS_STREAM
-                        and payload.get("type") == "InventoryReleaseRequested"
-                    ):
-                        process_inventory_release(payload, db)
+                    else:
+                        if payload.get("type") == "InventoryReleaseRequested":
+                            process_inventory_release(payload, db)
 
                     db.add(
                         InventoryProcessedEvent(
@@ -210,9 +195,7 @@ def run():
                         )
                     )
                     db.commit()
-
                     redis_client.xack(stream_name, GROUP_NAME, message_id)
-
                 finally:
                     db.close()
 
