@@ -11,8 +11,8 @@
 {% for product in products %}
     <li>
         <strong>{{ product.name }}</strong><br>
-        Product ID: {{ product.id }} <br>
-        Price: ₹{{ product.price }} <br>
+        Product ID: {{ product.id }}<br>
+        Price: ₹{{ product.price }}<br>
         Available stock: {{ inventory.get(product.id, 0) }}
 
         <form method="post" action="/ui/order" style="margin-top: 5px;">
@@ -29,28 +29,50 @@
 <h2>Orders</h2>
 
 {% if orders %}
-    <table border="1" cellpadding="6" cellspacing="0">
-        <thead>
-            <tr>
-                <th>Order ID</th>
-                <th>Product ID</th>
-                <th>Quantity</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for order in orders %}
-            <tr>
-                <td>{{ order.id }}</td>
-                <td>{{ order.product_id }}</td>
-                <td>{{ order.quantity }}</td>
-                <td><strong>{{ order.status }}</strong></td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
+<table border="1" cellpadding="6" cellspacing="0">
+    <thead>
+        <tr>
+            <th>Order ID</th>
+            <th>Product ID</th>
+            <th>Quantity</th>
+            <th>Status</th>
+            <th>Payment</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for order in orders %}
+        <tr>
+            <td>{{ order.id }}</td>
+            <td>{{ order.product_id }}</td>
+            <td>{{ order.quantity }}</td>
+            <td><strong>{{ order.status }}</strong></td>
+            <td>
+                {% if order.status == "AWAITING_PAYMENT" %}
+                <form method="post" action="/ui/pay">
+                    <input type="hidden" name="order_id" value="{{ order.id }}">
+                    <input
+                        type="number"
+                        step="0.01"
+                        name="amount_paid"
+                        placeholder="Pay ₹{{ order.total_price }}"
+                        required
+                    >
+                    <button type="submit">Pay</button>
+                </form>
+                {% elif order.status == "CONFIRMED" %}
+                    <strong>PAID</strong>
+                {% elif order.status == "CANCELLED" %}
+                    INVALID
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
 {% else %}
-    <p>No orders yet.</p>
+<p>No orders yet.</p>
 {% endif %}
 
 </body>

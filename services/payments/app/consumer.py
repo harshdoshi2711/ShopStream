@@ -3,6 +3,7 @@
 import json
 import redis
 import logging
+import random
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -15,55 +16,60 @@ from services.orders.app.models.order import Order
 configure_logging()
 logger = logging.getLogger("shopstream.payments")
 
-STREAM_NAME = "payment_events"
+PAYMENT_COMMANDS_STREAM = "payment_commands"
+PAYMENT_EVENTS_STREAM = "payment_events"
+
 GROUP_NAME = "payments_group"
 CONSUMER_NAME = "payments_1"
 
 
-def handle_payment_attempt(payload: dict, db: Session):
+def handle_payment_request(payload: dict, db: Session):
     correlation_id = payload.get("correlation_id", "-")
     order_id = payload.get("order_id")
-    amount_paid = payload.get("amount_paid")
+    amount_due = Decimal(str(payload.get("amount_due", 0)))
 
     logger.info(
-        "Payment attempt received",
+        "Payment request received",
         extra={
             "correlation_id": correlation_id,
             "order_id": order_id,
-            "amount_paid": amount_paid,
+            "amount_due": float(amount_due),
         },
     )
 
     order = db.query(Order).filter(Order.id == order_id).first()
-
     if not order:
         publish_event(
-            "payment_results",
+            PAYMENT_EVENTS_STREAM,
             {
                 "type": "PaymentFailed",
                 "correlation_id": correlation_id,
                 "order_id": order_id,
-                "amount_paid": amount_paid,
                 "reason": "Order not found",
             },
         )
         return
 
-    expected_amount = Decimal(order.total_price)
-    paid_amount = Decimal(str(amount_paid))
+    # 🛑 Terminal guard
+    if order.status in ("CONFIRMED", "CANCELLED"):
+        return
 
-    if paid_amount == expected_amount:
+    # 🧪 Simulate payment outcome (for now)
+    payment_successful = random.choice([True, False])
+
+    if payment_successful:
         publish_event(
-            "payment_results",
+            PAYMENT_EVENTS_STREAM,
             {
                 "type": "PaymentSucceeded",
                 "correlation_id": correlation_id,
                 "order_id": order_id,
-                "amount_paid": float(paid_amount),
+                "amount_paid": float(amount_due),
             },
         )
+
         logger.info(
-            "Payment successful",
+            "Payment succeeded",
             extra={
                 "correlation_id": correlation_id,
                 "order_id": order_id,
@@ -71,22 +77,20 @@ def handle_payment_attempt(payload: dict, db: Session):
         )
     else:
         publish_event(
-            "payment_results",
+            PAYMENT_EVENTS_STREAM,
             {
                 "type": "PaymentFailed",
                 "correlation_id": correlation_id,
                 "order_id": order_id,
-                "amount_paid": float(paid_amount),
-                "reason": "Amount mismatch",
+                "reason": "Payment declined",
             },
         )
+
         logger.warning(
             "Payment failed",
             extra={
                 "correlation_id": correlation_id,
                 "order_id": order_id,
-                "expected": float(expected_amount),
-                "paid": float(paid_amount),
             },
         )
 
@@ -100,7 +104,7 @@ def run():
 
     try:
         redis_client.xgroup_create(
-            STREAM_NAME,
+            PAYMENT_COMMANDS_STREAM,
             GROUP_NAME,
             id="0",
             mkstream=True,
@@ -108,16 +112,13 @@ def run():
     except redis.exceptions.ResponseError:
         pass
 
-    logger.info(
-        "Payments service started",
-        extra={"correlation_id": "-"},
-    )
+    logger.info("Payments service started", extra={"correlation_id": "-"})
 
     while True:
         messages = redis_client.xreadgroup(
             GROUP_NAME,
             CONSUMER_NAME,
-            streams={STREAM_NAME: ">"},
+            streams={PAYMENT_COMMANDS_STREAM: ">"},
             count=1,
             block=5000,
         )
@@ -131,8 +132,12 @@ def run():
 
                 db = SessionLocal()
                 try:
-                    handle_payment_attempt(payload, db)
-                    redis_client.xack(STREAM_NAME, GROUP_NAME, message_id)
+                    handle_payment_request(payload, db)
+                    redis_client.xack(
+                        PAYMENT_COMMANDS_STREAM,
+                        GROUP_NAME,
+                        message_id,
+                    )
                 finally:
                     db.close()
 

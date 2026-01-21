@@ -52,7 +52,11 @@ services:
       - .env
     environment:
       PYTHONPATH: /app
-    command: python workers/outbox_publisher.py
+    command: >
+      sh -c "
+      scripts/start-with-migrations.sh
+      python workers/outbox_publisher.py
+      "
     depends_on:
       postgres:
         condition: service_healthy

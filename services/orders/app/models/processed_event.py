@@ -9,7 +9,9 @@ from common.database.session import Base
 class OrdersProcessedEvent(Base):
     __tablename__ = "orders_processed_events"
 
+    stream_name = Column(String, primary_key=True)
     event_id = Column(String, primary_key=True)
+
     processed_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),

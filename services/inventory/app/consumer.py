@@ -8,15 +8,17 @@ from sqlalchemy.orm import Session
 
 from common.database.session import SessionLocal
 from services.inventory.app.models.inventory import Inventory
+from services.inventory.app.models.processed_event import InventoryProcessedEvent
 from common.messaging.redis_streams import publish_event
 from common.config.logging import configure_logging
-from services.inventory.app.models.processed_event import InventoryProcessedEvent
-
 
 configure_logging()
 logger = logging.getLogger("shopstream.inventory")
 
-STREAM_NAME = "order_events"
+ORDER_STREAM = "order_events"
+INVENTORY_COMMANDS_STREAM = "inventory_commands"
+INVENTORY_EVENTS_STREAM = "inventory_events"
+
 GROUP_NAME = "inventory_group"
 CONSUMER_NAME = "inventory_1"
 
@@ -46,11 +48,12 @@ def process_order_created(payload: dict, db: Session):
                 "correlation_id": correlation_id,
                 "order_id": order_id,
                 "product_id": product_id,
+                "available_stock": inventory.stock if inventory else None,
             },
         )
 
         publish_event(
-            "inventory_events",
+            INVENTORY_EVENTS_STREAM,
             {
                 "type": "InventoryFailed",
                 "correlation_id": correlation_id,
@@ -75,9 +78,63 @@ def process_order_created(payload: dict, db: Session):
     )
 
     publish_event(
-        "inventory_events",
+        INVENTORY_EVENTS_STREAM,
         {
             "type": "InventoryReserved",
+            "correlation_id": correlation_id,
+            "order_id": order_id,
+            "product_id": product_id,
+            "quantity": quantity,
+        },
+    )
+
+
+def process_inventory_release(payload: dict, db: Session):
+    correlation_id = payload.get("correlation_id", "-")
+    order_id = payload["order_id"]
+    product_id = payload["product_id"]
+    quantity = payload["quantity"]
+
+    logger.info(
+        "Inventory release requested",
+        extra={
+            "correlation_id": correlation_id,
+            "order_id": order_id,
+            "product_id": product_id,
+            "quantity": quantity,
+        },
+    )
+
+    inventory = db.query(Inventory).filter_by(product_id=product_id).first()
+    if not inventory:
+        logger.error(
+            "Inventory release failed — product not found",
+            extra={
+                "correlation_id": correlation_id,
+                "order_id": order_id,
+                "product_id": product_id,
+            },
+        )
+        return
+
+    inventory.stock += quantity
+    db.commit()
+
+    logger.info(
+        "Inventory released",
+        extra={
+            "correlation_id": correlation_id,
+            "order_id": order_id,
+            "product_id": product_id,
+            "current_stock": inventory.stock,
+        },
+    )
+
+    # 🔴 CRITICAL FIX: emit terminal event
+    publish_event(
+        INVENTORY_EVENTS_STREAM,
+        {
+            "type": "InventoryReleased",
             "correlation_id": correlation_id,
             "order_id": order_id,
             "product_id": product_id,
@@ -93,18 +150,22 @@ def run():
         decode_responses=True,
     )
 
-    try:
-        redis_client.xgroup_create(
-            STREAM_NAME, GROUP_NAME, id="0", mkstream=True
-        )
-    except redis.exceptions.ResponseError:
-        pass
+    for stream in (ORDER_STREAM, INVENTORY_COMMANDS_STREAM):
+        try:
+            redis_client.xgroup_create(stream, GROUP_NAME, id="0", mkstream=True)
+        except redis.exceptions.ResponseError:
+            pass
+
+    logger.info("Inventory service started", extra={"correlation_id": "-"})
 
     while True:
         messages = redis_client.xreadgroup(
             GROUP_NAME,
             CONSUMER_NAME,
-            streams={STREAM_NAME: ">"},
+            streams={
+                ORDER_STREAM: ">",
+                INVENTORY_COMMANDS_STREAM: ">",
+            },
             count=1,
             block=5000,
         )
@@ -112,48 +173,49 @@ def run():
         if not messages:
             continue
 
-        for _, entries in messages:
+        for stream_name, entries in messages:
             for message_id, fields in entries:
                 payload = json.loads(fields["payload"])
-                event_id = message_id  # Redis Stream ID
 
                 db = SessionLocal()
                 try:
-                    # 🔐 Idempotency check
                     already_processed = (
                         db.query(InventoryProcessedEvent)
-                        .filter_by(event_id=event_id)
+                        .filter_by(
+                            stream_name=stream_name,
+                            event_id=message_id,
+                        )
                         .first()
                     )
 
                     if already_processed:
-                        logger.info(
-                            "Duplicate inventory event ignored",
-                            extra={
-                                "correlation_id": payload.get("correlation_id", "-"),
-                                "event_id": event_id,
-                            },
-                        )
-                        redis_client.xack(STREAM_NAME, GROUP_NAME, message_id)
+                        redis_client.xack(stream_name, GROUP_NAME, message_id)
                         continue
 
-                    # Normal processing
-                    process_order_created(payload, db)
+                    if stream_name == ORDER_STREAM:
+                        process_order_created(payload, db)
 
-                    # Record successful processing
+                    elif (
+                        stream_name == INVENTORY_COMMANDS_STREAM
+                        and payload.get("type") == "InventoryReleaseRequested"
+                    ):
+                        process_inventory_release(payload, db)
+
                     db.add(
                         InventoryProcessedEvent(
-                            event_id=event_id,
-                            order_id=payload["order_id"],
+                            stream_name=stream_name,
+                            event_id=message_id,
+                            order_id=payload.get("order_id"),
                             correlation_id=payload.get("correlation_id"),
                         )
                     )
                     db.commit()
 
-                    redis_client.xack(STREAM_NAME, GROUP_NAME, message_id)
+                    redis_client.xack(stream_name, GROUP_NAME, message_id)
 
                 finally:
                     db.close()
+
 
 if __name__ == "__main__":
     run()
