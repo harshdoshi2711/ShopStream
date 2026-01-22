@@ -9,7 +9,7 @@ settings = get_settings()
 
 class CorrelationIdFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        # If correlation_id not provided, render as "-"
+        # Always guarantee correlation_id exists
         if not hasattr(record, "correlation_id"):
             record.correlation_id = "-"
         return True
@@ -26,7 +26,9 @@ def configure_logging():
 
     root = logging.getLogger()
     root.setLevel(settings.log_level)
-    root.addHandler(handler)
 
-    # 🔗 Attach filter globally
+    # 🚨 CRITICAL FIX: prevent duplicate handlers on reload
+    if not root.handlers:
+        root.addHandler(handler)
+
     root.addFilter(CorrelationIdFilter())

@@ -9,6 +9,10 @@ celery_app = Celery(
     "shopstream",
     broker=f"redis://{settings.redis_host}:{settings.redis_port}/0",
     backend=f"redis://{settings.redis_host}:{settings.redis_port}/1",
+    include=[
+        "workers.dlq_scanner",
+        "workers.dlq_retry"
+    ],
 )
 
 celery_app.conf.update(
@@ -18,3 +22,8 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+# # Critical: tell Celery where to find tasks
+# celery_app.autodiscover_tasks(
+#     packages=["workers"],
+# )
