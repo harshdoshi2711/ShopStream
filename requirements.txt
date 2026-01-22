@@ -10,3 +10,4 @@ pydantic-settings
 jinja2
 httpx
 python-multipart
+openai>=1.0.0

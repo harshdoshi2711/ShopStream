@@ -5,19 +5,15 @@ from sqlalchemy.orm import Session
 
 from common.database.session import get_db
 from services.agent.app.schemas.responses import AgentResponse
-from services.agent.app.tools.products import get_trending_products
+from services.agent.app.agent.orchestrator import ShopAgentOrchestrator
 
 router = APIRouter(prefix="/ai", tags=["shopagent"])
+
+orchestrator = ShopAgentOrchestrator()
 
 
 @router.post("/assist", response_model=AgentResponse)
 def assist(query: str, db: Session = Depends(get_db)):
-    products = get_trending_products(db)
+    response = orchestrator.handle_query(query, db)
 
-    return AgentResponse(
-        answer="Here are some trending products.",
-        suggestions=[p["name"] for p in products],
-        metadata={
-            "tool_used": "get_trending_products",
-        },
-    )
+    return AgentResponse(**response)
