@@ -1,0 +1,20 @@
+# workers/celery_app.py
+
+from celery import Celery
+from common.config.settings import get_settings
+
+settings = get_settings()
+
+celery_app = Celery(
+    "shopstream",
+    broker=f"redis://{settings.redis_host}:{settings.redis_port}/0",
+    backend=f"redis://{settings.redis_host}:{settings.redis_port}/1",
+)
+
+celery_app.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="UTC",
+    enable_utc=True,
+)
