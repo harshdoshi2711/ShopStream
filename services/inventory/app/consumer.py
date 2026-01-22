@@ -7,10 +7,12 @@ import logging
 from sqlalchemy.orm import Session
 
 from common.database.session import SessionLocal
+from common.config.logging import configure_logging
+from common.messaging.redis_streams import publish_event
+from common.messaging.dead_letter import send_to_dlq
+
 from services.inventory.app.models.inventory import Inventory
 from services.inventory.app.models.processed_event import InventoryProcessedEvent
-from common.messaging.redis_streams import publish_event
-from common.config.logging import configure_logging
 
 configure_logging()
 logger = logging.getLogger("shopstream.inventory")
@@ -114,7 +116,7 @@ def process_inventory_release(payload: dict, db: Session):
                 "product_id": product_id,
             },
         )
-        return
+        raise RuntimeError("Inventory record not found during release")
 
     inventory.stock += quantity
     db.commit()
@@ -171,20 +173,22 @@ def run():
             for message_id, fields in entries:
                 payload = json.loads(fields["payload"])
                 db = SessionLocal()
+
                 try:
-                    if (
+                    already_processed = (
                         db.query(InventoryProcessedEvent)
                         .filter_by(stream_name=stream_name, event_id=message_id)
                         .first()
-                    ):
+                    )
+
+                    if already_processed:
                         redis_client.xack(stream_name, GROUP_NAME, message_id)
                         continue
 
                     if stream_name == ORDER_STREAM:
                         process_order_created(payload, db)
                     else:
-                        if payload.get("type") == "InventoryReleaseRequested":
-                            process_inventory_release(payload, db)
+                        process_inventory_release(payload, db)
 
                     db.add(
                         InventoryProcessedEvent(
@@ -196,6 +200,28 @@ def run():
                     )
                     db.commit()
                     redis_client.xack(stream_name, GROUP_NAME, message_id)
+
+                except Exception as e:
+                    db.rollback()
+
+                    logger.exception(
+                        "Unhandled error in inventory consumer",
+                        extra={
+                            "correlation_id": payload.get("correlation_id", "-"),
+                            "stream_name": stream_name,
+                            "event_id": message_id,
+                        },
+                    )
+
+                    send_to_dlq(
+                        source_stream=stream_name,
+                        message_id=message_id,
+                        payload=payload,
+                        error=e,
+                    )
+
+                    redis_client.xack(stream_name, GROUP_NAME, message_id)
+
                 finally:
                     db.close()
 
