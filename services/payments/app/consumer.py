@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from common.config.logging import configure_logging
 from common.database.session import SessionLocal
 from common.messaging.redis_streams import publish_event
+from common.messaging.dead_letter import send_to_dlq
+
 from services.orders.app.models.order import Order
 
 configure_logging()
@@ -133,11 +135,35 @@ def run():
             for message_id, fields in entries:
                 payload = json.loads(fields["payload"])
                 db = SessionLocal()
+
                 try:
                     handle_payment_request(payload, db)
                     redis_client.xack(
                         PAYMENT_COMMANDS_STREAM, GROUP_NAME, message_id
                     )
+
+                except Exception as e:
+                    db.rollback()
+
+                    logger.exception(
+                        "Unhandled error in payments consumer",
+                        extra={
+                            "correlation_id": payload.get("correlation_id", "-"),
+                            "event_id": message_id,
+                        },
+                    )
+
+                    send_to_dlq(
+                        source_stream=PAYMENT_COMMANDS_STREAM,
+                        message_id=message_id,
+                        payload=payload,
+                        error=e,
+                    )
+
+                    redis_client.xack(
+                        PAYMENT_COMMANDS_STREAM, GROUP_NAME, message_id
+                    )
+
                 finally:
                     db.close()
 
