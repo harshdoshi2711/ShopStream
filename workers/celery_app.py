@@ -1,6 +1,7 @@
 # workers/celery_app.py
 
 from celery import Celery
+from celery.schedules import crontab
 from common.config.settings import get_settings
 
 settings = get_settings()
@@ -21,9 +22,13 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-)
 
-# # Critical: tell Celery where to find tasks
-# celery_app.autodiscover_tasks(
-#     packages=["workers"],
-# )
+# 🔁 Periodic tasks
+    beat_schedule={
+        "retry-dead-letter-events-every-minute": {
+            "task": "workers.dlq_scanner.scan_and_retry_dlq",
+            "schedule": 60.0,
+            "args": (),
+        }
+    },
+)
