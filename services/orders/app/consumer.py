@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from common.database.session import SessionLocal
 from common.config.logging import configure_logging
 from common.messaging.redis_streams import publish_event
+from common.messaging.dead_letter import send_to_dlq
+
 from services.orders.app.models.order import Order
 from services.orders.app.models.processed_event import OrdersProcessedEvent
 
@@ -179,12 +181,18 @@ def run():
             for message_id, fields in entries:
                 payload = json.loads(fields["payload"])
                 db = SessionLocal()
+
                 try:
-                    if (
+                    already_processed = (
                         db.query(OrdersProcessedEvent)
-                        .filter_by(stream_name=stream_name, event_id=message_id)
+                        .filter_by(
+                            stream_name=stream_name,
+                            event_id=message_id,
+                        )
                         .first()
-                    ):
+                    )
+
+                    if already_processed:
                         redis_client.xack(stream_name, GROUP_NAME, message_id)
                         continue
 
@@ -201,6 +209,19 @@ def run():
                     )
                     db.commit()
                     redis_client.xack(stream_name, GROUP_NAME, message_id)
+
+                except Exception as e:
+                    db.rollback()
+
+                    send_to_dlq(
+                        source_stream=stream_name,
+                        message_id=message_id,
+                        payload=payload,
+                        error=e,
+                    )
+
+                    redis_client.xack(stream_name, GROUP_NAME, message_id)
+
                 finally:
                     db.close()
 
