@@ -1,21 +1,23 @@
 # services/agent/app/api/assist.py
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from common.database.session import get_db
 from services.agent.app.schemas.responses import AgentResponse
+from services.agent.app.tools.products import get_trending_products
 
 router = APIRouter(prefix="/ai", tags=["shopagent"])
 
 
 @router.post("/assist", response_model=AgentResponse)
-def assist(query: str):
-    """
-    Stub endpoint for ShopAgent.
-    Real reasoning + tools will be added in later phases.
-    """
+def assist(query: str, db: Session = Depends(get_db)):
+    products = get_trending_products(db)
+
     return AgentResponse(
-        answer="ShopAgent is online, but reasoning is not enabled yet.",
-        suggestions=[],
+        answer="Here are some trending products.",
+        suggestions=[p["name"] for p in products],
         metadata={
-            "status": "stub",
+            "tool_used": "get_trending_products",
         },
     )
