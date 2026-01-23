@@ -62,19 +62,20 @@
 <table border="1" cellpadding="6" cellspacing="0">
     <thead>
         <tr>
-            <th>Order ID</th>
-            <th>Product ID</th>
-            <th>Quantity</th>
+            <th>Order</th>
             <th>Status</th>
             <th>Payment</th>
+            <th>Saga Timeline</th>
         </tr>
     </thead>
     <tbody>
     {% for order in orders %}
         <tr>
-            <td>{{ order.id }}</td>
-            <td>{{ order.product_id }}</td>
-            <td>{{ order.quantity }}</td>
+            <td>
+                ID {{ order.id }}<br>
+                Product {{ order.product_id }}<br>
+                Qty {{ order.quantity }}
+            </td>
             <td><strong>{{ order.status }}</strong></td>
             <td>
                 {% if order.status == "AWAITING_PAYMENT" %}
@@ -90,12 +91,21 @@
                     <button type="submit">Pay</button>
                 </form>
                 {% elif order.status == "CONFIRMED" %}
-                    <strong>PAID</strong>
+                    PAID
                 {% elif order.status == "CANCELLED" %}
-                    INVALID
+                    CANCELLED
                 {% else %}
                     —
                 {% endif %}
+            </td>
+            <td>
+                <ul>
+                {% for step in saga_timelines[order.id] %}
+                    <li>
+                        {{ step.step }} <em>({{ step.source }})</em>
+                    </li>
+                {% endfor %}
+                </ul>
             </td>
         </tr>
     {% endfor %}
