@@ -1,3 +1,5 @@
+# services/agent/app/agent/llm_client.py
+
 import logging
 from openai import OpenAI, OpenAIError
 
@@ -25,19 +27,19 @@ class LLMClient:
         self.client = OpenAI(
             api_key=settings.openrouter_api_key,
             base_url="https://openrouter.ai/api/v1",
-            timeout=5.0,  # 🔒 HARD TIMEOUT
+            timeout=5.0,  # hard timeout
         )
 
     def classify_intent(self, user_query: str) -> str:
         """
-        Return a single intent string.
-        Never raises exceptions.
+        Classify user intent.
+        Never raises. Always returns a safe intent.
         """
 
         prompt = f"""
-You are a classifier for an e-commerce assistant.
+You are an intent classifier for an e-commerce assistant.
 
-Choose ONE intent from this list:
+Choose EXACTLY ONE intent from:
 - TRENDING_PRODUCTS
 - FILTER_PRODUCTS
 - ORDER_STATUS
@@ -47,7 +49,7 @@ Choose ONE intent from this list:
 User query:
 \"\"\"{user_query}\"\"\"
 
-Respond with ONLY the intent.
+Respond with ONLY the intent name.
 """
 
         try:
@@ -57,38 +59,44 @@ Respond with ONLY the intent.
                 temperature=0,
             )
 
-            intent = (
-                response.choices[0]
-                .message
-                .content
-                .strip()
-                .upper()
-            )
+            raw_intent = response.choices[0].message.content.strip().upper()
 
-            if intent not in self.ALLOWED_INTENTS:
+            if raw_intent not in self.ALLOWED_INTENTS:
                 logger.warning(
-                    "LLM returned invalid intent, falling back to UNKNOWN",
-                    extra={"intent": intent},
+                    "LLM returned unsupported intent",
+                    extra={
+                        "correlation_id": "-",
+                        "raw_intent": raw_intent,
+                    },
                 )
                 return "UNKNOWN"
 
             logger.info(
                 "LLM intent classification succeeded",
-                extra={"intent": intent},
+                extra={
+                    "correlation_id": "-",
+                    "intent": raw_intent,
+                },
             )
 
-            return intent
+            return raw_intent
 
         except OpenAIError as e:
             logger.error(
                 "LLM request failed",
-                extra={"error": str(e)},
+                extra={
+                    "correlation_id": "-",
+                    "error": str(e),
+                },
             )
             return "UNKNOWN"
 
         except Exception as e:
             logger.exception(
                 "Unexpected LLM failure",
-                extra={"error": str(e)},
+                extra={
+                    "correlation_id": "-",
+                    "error": str(e),
+                },
             )
             return "UNKNOWN"
