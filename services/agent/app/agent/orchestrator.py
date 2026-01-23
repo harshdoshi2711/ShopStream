@@ -14,12 +14,10 @@ logger = logging.getLogger("shopstream.shopagent.orchestrator")
 class ShopAgentOrchestrator:
     """
     Central coordinator for ShopAgent.
-
-    Responsibilities:
-    - LLM intent classification
-    - Intent → tool routing
-    - Response normalization (API contract enforcement)
-    - Bounded context tracking (internal only)
+    Owns:
+    - intent resolution (LLM + followups)
+    - context updates
+    - API response normalization
     """
 
     def __init__(self):
@@ -32,41 +30,45 @@ class ShopAgentOrchestrator:
         db: Session,
     ) -> Dict[str, Any]:
 
-        logger.info(
-            "ShopAgent received query",
-            extra={"query": query},
-        )
+        logger.info("ShopAgent received query", extra={"query": query})
 
-        intent = self.llm.classify_intent(query)
+        llm_intent = self.llm.classify_intent(query)
 
         logger.info(
-            "Intent classified",
-            extra={"intent": intent},
+            "LLM intent classified",
+            extra={"llm_intent": llm_intent},
         )
 
         routed = route_intent(
-            intent=intent,
+            intent=llm_intent,
             query=query,
             db=db,
-            context=self.context,   # ✅ PASS CONTEXT
+            context=self.context,
         )
 
         suggestions = routed.get("results", [])
         answer = routed.get("answer", "I'm not sure how to help with that.")
 
-        fallback_used = intent == "UNKNOWN"
+        # 🔑 CRITICAL FIX:
+        # effective intent is what the router actually used
+        effective_intent = (
+            self.context.last_intent
+            if llm_intent == "UNKNOWN" and self.context.last_intent
+            else llm_intent
+        )
 
-        # ✅ Extract IDs robustly
-        result_ids = []
-        for item in suggestions:
-            if isinstance(item, dict):
-                if "product_id" in item:
-                    result_ids.append(item["product_id"])
-                elif "order_id" in item:
-                    result_ids.append(item["order_id"])
+        fallback_used = effective_intent == "UNKNOWN"
 
+        # SINGLE SOURCE OF TRUTH: stable `id`
+        result_ids = [
+            item["id"]
+            for item in suggestions
+            if isinstance(item, dict) and "id" in item
+        ]
+
+        # 🔑 UPDATE CONTEXT WITH EFFECTIVE INTENT (NOT RAW LLM INTENT)
         self.context.update(
-            intent=intent,
+            intent=effective_intent,
             query=query,
             result_ids=result_ids,
         )
@@ -74,7 +76,7 @@ class ShopAgentOrchestrator:
         logger.info(
             "ShopAgent response prepared",
             extra={
-                "intent": intent,
+                "effective_intent": effective_intent,
                 "result_count": len(suggestions),
                 "fallback_used": fallback_used,
             },
@@ -84,7 +86,7 @@ class ShopAgentOrchestrator:
             "answer": answer,
             "suggestions": suggestions,
             "metadata": {
-                "intent": intent,
+                "intent": effective_intent,
                 "result_count": len(suggestions),
                 "fallback_used": fallback_used,
             },

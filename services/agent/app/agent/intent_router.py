@@ -1,6 +1,6 @@
 # services/agent/app/agent/intent_router.py
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 
 from services.agent.app.agent.context import ConversationContext
@@ -26,6 +26,11 @@ SAFE_FALLBACK_MESSAGE = (
     "or suggest alternatives."
 )
 
+NO_MORE_RESULTS_MESSAGE = (
+    "That’s everything I have for now. "
+    "Would you like to try something else?"
+)
+
 
 def _extract_first_number(text: str) -> Optional[int]:
     digits = "".join(filter(str.isdigit, text))
@@ -33,8 +38,7 @@ def _extract_first_number(text: str) -> Optional[int]:
 
 
 def _is_followup(query: str) -> bool:
-    lowered = query.lower()
-    return lowered in {
+    return query.lower().strip() in {
         "show more",
         "more",
         "continue",
@@ -43,23 +47,28 @@ def _is_followup(query: str) -> bool:
     }
 
 
+def _filter_seen(results, seen_ids):
+    """
+    Filter out results already shown to the user.
+    Assumes EVERY result has a stable `id`.
+    """
+    return [
+        r for r in results
+        if r.get("id") not in seen_ids
+    ]
+
+
 def route_intent(
     intent: str,
     query: str,
     db: Session,
     context: ConversationContext,
 ) -> Dict[str, Any]:
-    """
-    Context-aware intent router.
 
-    Rules:
-    - Never mutates DB
-    - Never raises
-    - Uses bounded conversation context
-    """
+    is_followup = _is_followup(query)
 
-    # 🔁 FOLLOW-UP HANDLING
-    if _is_followup(query) and context.last_intent:
+    # 🔁 FOLLOW-UP → reuse last intent
+    if is_followup and context.last_intent:
         intent = context.last_intent
 
     # 🔐 UNKNOWN / UNSUPPORTED
@@ -69,35 +78,39 @@ def route_intent(
             "results": [],
         }
 
-    # 🧠 TRENDING
+    # 🧠 TRENDING PRODUCTS
     if intent == "TRENDING_PRODUCTS":
         results = get_trending_products(db)
+        filtered = _filter_seen(results, context.last_result_ids)
 
-        filtered = [
-            r for r in results
-            if r.get("product_id") not in context.last_result_ids
-        ]
+        if is_followup and not filtered:
+            return {
+                "answer": NO_MORE_RESULTS_MESSAGE,
+                "results": [],
+            }
 
         return {
             "answer": "Here are some trending products right now.",
             "results": filtered,
         }
 
-    # 🧠 FILTERED SEARCH
+    # 🧠 FILTERED PRODUCTS
     if intent == "FILTER_PRODUCTS":
         results = get_products_by_filters(db, query=query)
+        filtered = _filter_seen(results, context.last_result_ids)
 
-        filtered = [
-            r for r in results
-            if r.get("product_id") not in context.last_result_ids
-        ]
+        if is_followup and not filtered:
+            return {
+                "answer": NO_MORE_RESULTS_MESSAGE,
+                "results": [],
+            }
 
         return {
             "answer": "Here are some products that match your preferences.",
             "results": filtered,
         }
 
-    # 📦 ORDER STATUS
+    # 📦 ORDER STATUS (non-listable, no filtering)
     if intent == "ORDER_STATUS":
         order_id = _extract_first_number(query)
         if order_id is None:
@@ -106,12 +119,19 @@ def route_intent(
                 "results": [],
             }
 
+        result = explain_order_status(db, order_id)
+
         return {
             "answer": "Here’s what’s happening with your order.",
-            "results": [explain_order_status(db, order_id)],
+            "results": [
+                {
+                    "id": result["order_id"],  # 🔒 normalize
+                    **result,
+                }
+            ],
         }
 
-    # 🔁 ALTERNATIVES
+    # 🔁 SUGGEST ALTERNATIVES
     if intent == "SUGGEST_ALTERNATIVES":
         product_id = _extract_first_number(query)
         if product_id is None:
@@ -121,11 +141,13 @@ def route_intent(
             }
 
         results = suggest_alternatives(db, product_id)
+        filtered = _filter_seen(results, context.last_result_ids)
 
-        filtered = [
-            r for r in results
-            if r.get("product_id") not in context.last_result_ids
-        ]
+        if is_followup and not filtered:
+            return {
+                "answer": NO_MORE_RESULTS_MESSAGE,
+                "results": [],
+            }
 
         return {
             "answer": "Here are some alternatives you might like.",
