@@ -1,16 +1,33 @@
 # services/agent/app/schemas/responses.py
 
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import List, Any
 
 
 class AgentMetadata(BaseModel):
-    intent: str
-    result_count: int
-    fallback_used: bool
+    """
+    Metadata about how the agent handled the request.
+    """
+
+    intent: str = Field(..., description="Final resolved intent")
+    result_count: int = Field(..., description="Number of items returned")
+    fallback_used: bool = Field(
+        ..., description="True if agent used a safe fallback response"
+    )
 
 
 class AgentResponse(BaseModel):
-    answer: str
-    suggestions: List[Any]
+    """
+    Stable API contract for ShopAgent responses.
+
+    Guarantees:
+    - Always valid JSON
+    - suggestions is ALWAYS a list
+    """
+
+    answer: str = Field(..., description="Natural language response")
+    suggestions: List[Any] = Field(
+        default_factory=list,
+        description="Structured results (products, orders, etc.)",
+    )
     metadata: AgentMetadata

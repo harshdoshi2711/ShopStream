@@ -12,7 +12,11 @@ logger = logging.getLogger("shopstream.shopagent.llm")
 class LLMClient:
     """
     Hardened wrapper around OpenRouter / OpenAI-compatible API.
-    The LLM is treated as an unreliable dependency.
+
+    Rules:
+    - LLM is used ONLY for first-turn intent classification
+    - Follow-ups like "show more" must NOT reach the LLM
+    - Never raises
     """
 
     ALLOWED_INTENTS = {
@@ -23,18 +27,39 @@ class LLMClient:
         "UNKNOWN",
     }
 
+    FOLLOWUP_KEYWORDS = {
+        "show more",
+        "more",
+        "continue",
+        "next",
+        "what else",
+    }
+
     def __init__(self):
         self.client = OpenAI(
             api_key=settings.openrouter_api_key,
             base_url="https://openrouter.ai/api/v1",
-            timeout=5.0,  # hard timeout
+            timeout=5.0,
         )
 
     def classify_intent(self, user_query: str) -> str:
         """
         Classify user intent.
-        Never raises. Always returns a safe intent.
+
+        Guarantees:
+        - Follow-ups NEVER hit the LLM
+        - Always returns a valid intent
         """
+
+        normalized = user_query.lower().strip()
+
+        # 🔒 HARD GUARD: follow-ups never go to LLM
+        if normalized in self.FOLLOWUP_KEYWORDS:
+            logger.info(
+                "Follow-up detected, skipping LLM",
+                extra={"query": user_query},
+            )
+            return "UNKNOWN"
 
         prompt = f"""
 You are an intent classifier for an e-commerce assistant.
@@ -47,7 +72,7 @@ Choose EXACTLY ONE intent from:
 - UNKNOWN
 
 User query:
-\"\"\"{user_query}\"\"\"
+\"\"\"{user_query}\"\"\"  
 
 Respond with ONLY the intent name.
 """
@@ -64,19 +89,13 @@ Respond with ONLY the intent name.
             if raw_intent not in self.ALLOWED_INTENTS:
                 logger.warning(
                     "LLM returned unsupported intent",
-                    extra={
-                        "correlation_id": "-",
-                        "raw_intent": raw_intent,
-                    },
+                    extra={"raw_intent": raw_intent},
                 )
                 return "UNKNOWN"
 
             logger.info(
                 "LLM intent classification succeeded",
-                extra={
-                    "correlation_id": "-",
-                    "intent": raw_intent,
-                },
+                extra={"intent": raw_intent},
             )
 
             return raw_intent
@@ -84,19 +103,13 @@ Respond with ONLY the intent name.
         except OpenAIError as e:
             logger.error(
                 "LLM request failed",
-                extra={
-                    "correlation_id": "-",
-                    "error": str(e),
-                },
+                extra={"error": str(e)},
             )
             return "UNKNOWN"
 
         except Exception as e:
             logger.exception(
                 "Unexpected LLM failure",
-                extra={
-                    "correlation_id": "-",
-                    "error": str(e),
-                },
+                extra={"error": str(e)},
             )
             return "UNKNOWN"
