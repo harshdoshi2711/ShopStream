@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
+import requests
 
 from common.database.session import get_db
 from common.messaging.redis_streams import publish_event
@@ -12,6 +13,8 @@ from services.inventory.app.models.inventory import Inventory
 from services.orders.app.domain.order_service import create_order_with_outbox
 
 router = APIRouter(prefix="/ui", tags=["ui"])
+
+AGENT_URL = "http://shopagent:8001/ai/assist"
 
 
 @router.get("/products")
@@ -34,6 +37,52 @@ def list_products(request: Request, db: Session = Depends(get_db)):
             "products": products,
             "orders": orders,
             "inventory": inventory_by_product_id,
+            "agent_response": None,
+        },
+    )
+
+
+@router.post("/agent")
+def ask_agent(
+    request: Request,
+    query: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    agent_response = {
+        "answer": "ShopAgent is currently unavailable.",
+        "suggestions": [],
+    }
+
+    try:
+        response = requests.post(
+            AGENT_URL,
+            params={"query": query},
+            timeout=3,
+        )
+        if response.ok:
+            agent_response = response.json()
+    except Exception:
+        pass
+
+    products = db.query(Product).order_by(Product.id).all()
+    orders = db.query(Order).order_by(Order.id.desc()).all()
+    inventory_rows = db.query(Inventory).all()
+
+    inventory_by_product_id = {
+        row.product_id: row.stock for row in inventory_rows
+    }
+
+    from fastapi.templating import Jinja2Templates
+    templates = Jinja2Templates(directory="services/orders/app/ui/templates")
+
+    return templates.TemplateResponse(
+        "products.html",
+        {
+            "request": request,
+            "products": products,
+            "orders": orders,
+            "inventory": inventory_by_product_id,
+            "agent_response": agent_response,
         },
     )
 

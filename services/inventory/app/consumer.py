@@ -96,6 +96,8 @@ def process_inventory_release(payload: dict, db: Session):
     quantity = payload["quantity"]
     correlation_id = payload.get("correlation_id", "-")
 
+    release_key = f"{order_id}:{product_id}"
+
     logger.info(
         "Processing InventoryReleaseRequested",
         extra={
@@ -105,6 +107,27 @@ def process_inventory_release(payload: dict, db: Session):
             "quantity": quantity,
         },
     )
+
+    # 🔒 BUSINESS IDEMPOTENCY CHECK
+    already_released = (
+        db.query(InventoryProcessedEvent)
+        .filter_by(
+            stream_name="inventory_release",
+            event_id=release_key,
+        )
+        .first()
+    )
+
+    if already_released:
+        logger.warning(
+            "Inventory release already processed, skipping",
+            extra={
+                "correlation_id": correlation_id,
+                "order_id": order_id,
+                "product_id": product_id,
+            },
+        )
+        return
 
     inventory = db.query(Inventory).filter_by(product_id=product_id).first()
     if not inventory:
@@ -119,6 +142,17 @@ def process_inventory_release(payload: dict, db: Session):
         raise RuntimeError("Inventory record not found during release")
 
     inventory.stock += quantity
+
+    # 🔒 RECORD RELEASE AS PROCESSED (same transaction)
+    db.add(
+        InventoryProcessedEvent(
+            stream_name="inventory_release",
+            event_id=release_key,
+            order_id=order_id,
+            correlation_id=correlation_id,
+        )
+    )
+
     db.commit()
 
     logger.info(

@@ -26,6 +26,36 @@
 
 <hr>
 
+<h2>Ask ShopAgent</h2>
+
+<form method="post" action="/ui/agent">
+    <input
+        type="text"
+        name="query"
+        placeholder="Ask about products, orders, or alternatives..."
+        style="width: 400px;"
+        required
+    >
+    <button type="submit">Ask</button>
+</form>
+
+{% if agent_response %}
+    <div style="margin-top: 10px; padding: 10px; border: 1px solid #ccc;">
+        <strong>ShopAgent:</strong><br>
+        {{ agent_response.answer }}
+
+        {% if agent_response.suggestions %}
+            <ul>
+            {% for item in agent_response.suggestions %}
+                <li>{{ item }}</li>
+            {% endfor %}
+            </ul>
+        {% endif %}
+    </div>
+{% endif %}
+
+<hr>
+
 <h2>Orders</h2>
 
 {% if orders %}
