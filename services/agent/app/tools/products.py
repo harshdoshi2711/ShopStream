@@ -12,24 +12,37 @@ def get_trending_products(
     limit: int = 5,
 ) -> List[Dict[str, Any]]:
     """
-    Return top products based on availability and price.
-    Simple heuristic for demo purposes.
+    Return trending products based on available stock and price.
+    More realistic than pure price ordering.
     """
-    products = (
-        db.query(Product)
-        .order_by(Product.price.desc())
+
+    results = (
+        db.query(
+            Product.id,
+            Product.name,
+            Product.category,
+            Product.price,
+            Inventory.stock,
+        )
+        .join(Inventory, Inventory.product_id == Product.id)
+        .filter(Inventory.stock > 0)
+        .order_by(
+            Inventory.stock.desc(),
+            Product.price.desc(),
+        )
         .limit(limit)
         .all()
     )
 
     return [
         {
-            "product_id": p.id,
-            "name": p.name,
-            "category": p.category,
-            "price": float(p.price),
+            "id": r.id,
+            "name": r.name,
+            "category": r.category,
+            "price": float(r.price),
+            "stock": r.stock,
         }
-        for p in products
+        for r in results
     ]
 
 
@@ -41,9 +54,20 @@ def get_products_by_filters(
     limit: int = 10,
 ) -> List[Dict[str, Any]]:
     """
-    Filter products by category and price range.
+    Filter products by category, price range, and availability.
     """
-    query = db.query(Product)
+
+    query = (
+        db.query(
+            Product.id,
+            Product.name,
+            Product.category,
+            Product.price,
+            Inventory.stock,
+        )
+        .join(Inventory, Inventory.product_id == Product.id)
+        .filter(Inventory.stock > 0)
+    )
 
     if category:
         query = query.filter(Product.category == category)
@@ -54,14 +78,15 @@ def get_products_by_filters(
     if max_price is not None:
         query = query.filter(Product.price <= max_price)
 
-    products = query.limit(limit).all()
+    results = query.limit(limit).all()
 
     return [
         {
-            "product_id": p.id,
-            "name": p.name,
-            "category": p.category,
-            "price": float(p.price),
+            "id": r.id,
+            "name": r.name,
+            "category": r.category,
+            "price": float(r.price),
+            "stock": r.stock,
         }
-        for p in products
+        for r in results
     ]

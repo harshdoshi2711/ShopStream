@@ -1,3 +1,4 @@
+# services/agent/app/agent/intent_router.py
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 
@@ -10,11 +11,28 @@ from services.agent.app.tools.orders import (
     suggest_alternatives,
 )
 
+# 🔒 Explicit, documented intent set
+SUPPORTED_INTENTS = {
+    "TRENDING_PRODUCTS",
+    "FILTER_PRODUCTS",
+    "ORDER_STATUS",
+    "SUGGEST_ALTERNATIVES",
+}
 
 SAFE_FALLBACK_MESSAGE = (
     "I'm not sure how to help with that yet, "
-    "but I can help you browse products, check orders, or suggest alternatives."
+    "but I can help you browse products, check orders, "
+    "or suggest alternatives."
 )
+
+
+def _extract_first_number(text: str) -> int | None:
+    """
+    Extract the first integer found in the text.
+    Returns None if no digits are present.
+    """
+    digits = "".join(filter(str.isdigit, text))
+    return int(digits) if digits else None
 
 
 def route_intent(
@@ -23,41 +41,52 @@ def route_intent(
     db: Session,
 ) -> Dict[str, Any]:
     """
-    Route classified intent to a concrete tool call.
+    Route a classified intent to a concrete, read-only tool call.
+
+    This function:
+    - Never mutates state
+    - Never raises
+    - Always returns a safe response shape
     """
+
+    # 🔐 Guardrail: unknown or unsupported intent
+    if intent not in SUPPORTED_INTENTS:
+        return {
+            "answer": SAFE_FALLBACK_MESSAGE,
+            "results": [],
+        }
 
     if intent == "TRENDING_PRODUCTS":
         return {
-            "answer": "Here are some trending products.",
+            "answer": "Here are some trending products right now.",
             "results": get_trending_products(db),
         }
 
     if intent == "FILTER_PRODUCTS":
         return {
-            "answer": "Here are some matching products.",
-            "results": get_products_by_filters(db),
+            "answer": "Here are some products that match your preferences.",
+            # Pass query so tool can extract filters later
+            "results": get_products_by_filters(db, query=query),
         }
 
     if intent == "ORDER_STATUS":
-        try:
-            order_id = int("".join(filter(str.isdigit, query)))
-        except ValueError:
+        order_id = _extract_first_number(query)
+        if order_id is None:
             return {
-                "answer": "I couldn't determine the order number.",
+                "answer": "I couldn't determine which order you meant.",
                 "results": [],
             }
 
         return {
-            "answer": "Here is the status of your order.",
+            "answer": "Here’s what’s happening with your order.",
             "results": [explain_order_status(db, order_id)],
         }
 
     if intent == "SUGGEST_ALTERNATIVES":
-        try:
-            product_id = int("".join(filter(str.isdigit, query)))
-        except ValueError:
+        product_id = _extract_first_number(query)
+        if product_id is None:
             return {
-                "answer": "I couldn't identify the product.",
+                "answer": "I couldn't identify which product you’re referring to.",
                 "results": [],
             }
 
@@ -66,7 +95,7 @@ def route_intent(
             "results": suggest_alternatives(db, product_id),
         }
 
-    # Safe, professional fallback
+    # 🔚 Defensive fallback (should never be hit)
     return {
         "answer": SAFE_FALLBACK_MESSAGE,
         "results": [],
