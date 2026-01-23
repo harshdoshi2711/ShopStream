@@ -14,7 +14,7 @@ class ShopAgentOrchestrator:
     Coordinates:
     - LLM intent classification
     - Tool routing
-    - Structured response building
+    - Deterministic response shaping
     """
 
     def __init__(self):
@@ -27,18 +27,21 @@ class ShopAgentOrchestrator:
         )
 
         intent = self.llm.classify_intent(query)
+        fallback_used = False
 
         if intent == "UNKNOWN":
+            fallback_used = True
             logger.warning(
-                "ShopAgent using fallback intent",
+                "ShopAgent fallback activated",
                 extra={"query": query},
             )
 
         logger.info(
-            "ShopAgent intent classified",
+            "ShopAgent intent resolved",
             extra={
                 "query": query,
                 "intent": intent,
+                "fallback_used": fallback_used,
             },
         )
 
@@ -48,19 +51,23 @@ class ShopAgentOrchestrator:
             db=db,
         )
 
-        logger.info(
-            "ShopAgent response ready",
-            extra={
-                "intent": intent,
-                "result_count": len(routed["results"]),
-            },
-        )
-
-        return {
+        response = {
             "answer": routed["answer"],
             "suggestions": [],
             "metadata": {
                 "intent": intent,
                 "result_count": len(routed["results"]),
+                "fallback_used": fallback_used,
             },
         }
+
+        logger.info(
+            "ShopAgent response completed",
+            extra={
+                "intent": intent,
+                "result_count": len(routed["results"]),
+                "fallback_used": fallback_used,
+            },
+        )
+
+        return response
