@@ -1,5 +1,3 @@
-# services/agent/app/agent/intent_router.py
-
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 
@@ -10,6 +8,12 @@ from services.agent.app.tools.products import (
 from services.agent.app.tools.orders import (
     explain_order_status,
     suggest_alternatives,
+)
+
+
+SAFE_FALLBACK_MESSAGE = (
+    "I'm not sure how to help with that yet, "
+    "but I can help you browse products, check orders, or suggest alternatives."
 )
 
 
@@ -62,7 +66,8 @@ def route_intent(
             "results": suggest_alternatives(db, product_id),
         }
 
+    # Safe, professional fallback
     return {
-        "answer": "I'm not sure how to help with that yet.",
+        "answer": SAFE_FALLBACK_MESSAGE,
         "results": [],
     }

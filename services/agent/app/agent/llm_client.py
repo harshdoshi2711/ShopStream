@@ -1,7 +1,6 @@
-# services/agent/app/agent/llm_client.py
-
 import logging
 from openai import OpenAI, OpenAIError
+
 from common.config.settings import get_settings
 
 settings = get_settings()
@@ -14,11 +13,19 @@ class LLMClient:
     The LLM is treated as an unreliable dependency.
     """
 
+    ALLOWED_INTENTS = {
+        "TRENDING_PRODUCTS",
+        "FILTER_PRODUCTS",
+        "ORDER_STATUS",
+        "SUGGEST_ALTERNATIVES",
+        "UNKNOWN",
+    }
+
     def __init__(self):
         self.client = OpenAI(
             api_key=settings.openrouter_api_key,
             base_url="https://openrouter.ai/api/v1",
-            timeout=5.0,  # 🔒 HARD TIMEOUT (seconds)
+            timeout=5.0,  # 🔒 HARD TIMEOUT
         )
 
     def classify_intent(self, user_query: str) -> str:
@@ -50,7 +57,20 @@ Respond with ONLY the intent.
                 temperature=0,
             )
 
-            intent = response.choices[0].message.content.strip()
+            intent = (
+                response.choices[0]
+                .message
+                .content
+                .strip()
+                .upper()
+            )
+
+            if intent not in self.ALLOWED_INTENTS:
+                logger.warning(
+                    "LLM returned invalid intent, falling back to UNKNOWN",
+                    extra={"intent": intent},
+                )
+                return "UNKNOWN"
 
             logger.info(
                 "LLM intent classification succeeded",
