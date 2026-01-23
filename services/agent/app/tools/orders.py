@@ -17,11 +17,11 @@ def explain_order_status(
     order_id: int,
 ) -> Dict[str, Any]:
     """
-    Explain why an order is in its current state.
+    Explain WHY an order is in its current state using saga semantics.
     """
 
     logger.info(
-        "Explaining order status",
+        "Explaining order outcome",
         extra={"order_id": order_id},
     )
 
@@ -35,23 +35,69 @@ def explain_order_status(
         return {
             "order_id": order_id,
             "status": "UNKNOWN",
-            "explanation": "Order does not exist.",
+            "explanation": "This order does not exist.",
         }
 
-    explanations = {
-        "PENDING": "Your order was created and is waiting for inventory processing.",
-        "AWAITING_PAYMENT": "Inventory was reserved and payment is pending.",
-        "CONFIRMED": "Payment succeeded and your order is confirmed.",
-        "CANCELLED": "The order was cancelled due to inventory or payment failure.",
-    }
+    # Base explanation
+    explanation_parts: List[str] = [
+        "The order was created successfully."
+    ]
 
-    explanation = explanations.get(
-        order.status,
-        "The order is in an unknown state.",
+    # Inventory reasoning
+    inventory = (
+        db.query(Inventory)
+        .filter(Inventory.product_id == order.product_id)
+        .first()
     )
 
+    if order.status == "PENDING":
+        explanation_parts.append(
+            "It is currently waiting for inventory processing."
+        )
+
+    elif order.status == "AWAITING_PAYMENT":
+        explanation_parts.append(
+            "Inventory was successfully reserved."
+        )
+        explanation_parts.append(
+            "The system is waiting for payment to be completed."
+        )
+
+    elif order.status == "CONFIRMED":
+        explanation_parts.append(
+            "Inventory was reserved."
+        )
+        explanation_parts.append(
+            "Payment was completed successfully."
+        )
+        explanation_parts.append(
+            "The order is now confirmed."
+        )
+
+    elif order.status == "CANCELLED":
+        # Cancellation can happen for two reasons
+        if inventory and inventory.stock >= 0:
+            explanation_parts.append(
+                "Inventory was either unavailable or later released."
+            )
+
+        explanation_parts.append(
+            "The order was cancelled because one of the required steps failed."
+        )
+
+        explanation_parts.append(
+            "Any reserved inventory was released to keep the system consistent."
+        )
+
+    else:
+        explanation_parts.append(
+            "The order is in an unknown state."
+        )
+
+    explanation = " ".join(explanation_parts)
+
     logger.info(
-        "Order status resolved",
+        "Order explanation generated",
         extra={
             "order_id": order.id,
             "status": order.status,
