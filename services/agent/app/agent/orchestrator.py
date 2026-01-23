@@ -28,6 +28,12 @@ class ShopAgentOrchestrator:
 
         intent = self.llm.classify_intent(query)
 
+        if intent == "UNKNOWN":
+            logger.warning(
+                "ShopAgent using fallback intent",
+                extra={"query": query},
+            )
+
         logger.info(
             "ShopAgent intent classified",
             extra={
