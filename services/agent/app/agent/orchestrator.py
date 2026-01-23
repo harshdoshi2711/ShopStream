@@ -48,19 +48,22 @@ class ShopAgentOrchestrator:
             intent=intent,
             query=query,
             db=db,
+            context=self.context,   # ✅ PASS CONTEXT
         )
 
-        # Normalize tool output
         suggestions = routed.get("results", [])
         answer = routed.get("answer", "I'm not sure how to help with that.")
 
         fallback_used = intent == "UNKNOWN"
 
-        # Extract IDs for internal context only
+        # ✅ Extract IDs robustly
         result_ids = []
         for item in suggestions:
-            if isinstance(item, dict) and "id" in item:
-                result_ids.append(item["id"])
+            if isinstance(item, dict):
+                if "product_id" in item:
+                    result_ids.append(item["product_id"])
+                elif "order_id" in item:
+                    result_ids.append(item["order_id"])
 
         self.context.update(
             intent=intent,
@@ -77,7 +80,6 @@ class ShopAgentOrchestrator:
             },
         )
 
-        # 🔒 FINAL API SHAPE — MUST MATCH AgentResponse EXACTLY
         return {
             "answer": answer,
             "suggestions": suggestions,

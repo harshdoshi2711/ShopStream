@@ -1,7 +1,9 @@
 # services/agent/app/agent/intent_router.py
-from typing import Dict, Any
+
+from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 
+from services.agent.app.agent.context import ConversationContext
 from services.agent.app.tools.products import (
     get_trending_products,
     get_products_by_filters,
@@ -11,7 +13,6 @@ from services.agent.app.tools.orders import (
     suggest_alternatives,
 )
 
-# 🔒 Explicit, documented intent set
 SUPPORTED_INTENTS = {
     "TRENDING_PRODUCTS",
     "FILTER_PRODUCTS",
@@ -26,49 +27,77 @@ SAFE_FALLBACK_MESSAGE = (
 )
 
 
-def _extract_first_number(text: str) -> int | None:
-    """
-    Extract the first integer found in the text.
-    Returns None if no digits are present.
-    """
+def _extract_first_number(text: str) -> Optional[int]:
     digits = "".join(filter(str.isdigit, text))
     return int(digits) if digits else None
+
+
+def _is_followup(query: str) -> bool:
+    lowered = query.lower()
+    return lowered in {
+        "show more",
+        "more",
+        "continue",
+        "next",
+        "what else",
+    }
 
 
 def route_intent(
     intent: str,
     query: str,
     db: Session,
+    context: ConversationContext,
 ) -> Dict[str, Any]:
     """
-    Route a classified intent to a concrete, read-only tool call.
+    Context-aware intent router.
 
-    This function:
-    - Never mutates state
+    Rules:
+    - Never mutates DB
     - Never raises
-    - Always returns a safe response shape
+    - Uses bounded conversation context
     """
 
-    # 🔐 Guardrail: unknown or unsupported intent
+    # 🔁 FOLLOW-UP HANDLING
+    if _is_followup(query) and context.last_intent:
+        intent = context.last_intent
+
+    # 🔐 UNKNOWN / UNSUPPORTED
     if intent not in SUPPORTED_INTENTS:
         return {
             "answer": SAFE_FALLBACK_MESSAGE,
             "results": [],
         }
 
+    # 🧠 TRENDING
     if intent == "TRENDING_PRODUCTS":
+        results = get_trending_products(db)
+
+        filtered = [
+            r for r in results
+            if r.get("product_id") not in context.last_result_ids
+        ]
+
         return {
             "answer": "Here are some trending products right now.",
-            "results": get_trending_products(db),
+            "results": filtered,
         }
 
+    # 🧠 FILTERED SEARCH
     if intent == "FILTER_PRODUCTS":
+        results = get_products_by_filters(db, query=query)
+
+        filtered = [
+            r for r in results
+            if r.get("product_id") not in context.last_result_ids
+        ]
+
         return {
             "answer": "Here are some products that match your preferences.",
-            # Pass query so tool can extract filters later
-            "results": get_products_by_filters(db, query=query),
+            "results": filtered,
         }
 
+    # 📦 ORDER STATUS
     if intent == "ORDER_STATUS":
         order_id = _extract_first_number(query)
         if order_id is None:
@@ -82,6 +111,7 @@ def route_intent(
             "results": [explain_order_status(db, order_id)],
         }
 
+    # 🔁 ALTERNATIVES
     if intent == "SUGGEST_ALTERNATIVES":
         product_id = _extract_first_number(query)
         if product_id is None:
@@ -90,12 +120,18 @@ def route_intent(
                 "results": [],
             }
 
+        results = suggest_alternatives(db, product_id)
+
+        filtered = [
+            r for r in results
+            if r.get("product_id") not in context.last_result_ids
+        ]
+
         return {
             "answer": "Here are some alternatives you might like.",
-            "results": suggest_alternatives(db, product_id),
+            "results": filtered,
         }
 
-    # 🔚 Defensive fallback (should never be hit)
     return {
         "answer": SAFE_FALLBACK_MESSAGE,
         "results": [],
