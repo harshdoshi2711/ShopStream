@@ -20,9 +20,14 @@ logger = logging.getLogger("shopstream.orders.consumer")
 INVENTORY_EVENTS_STREAM = "inventory_events"
 PAYMENT_EVENTS_STREAM = "payment_events"
 INVENTORY_COMMANDS_STREAM = "inventory_commands"
+PAYMENT_COMMANDS_STREAM = "payment_commands"
 
 GROUP_NAME = "orders_group"
 CONSUMER_NAME = "orders_1"
+
+
+def _payment_request_key(order_id: int) -> str:
+    return f"payment_request:{order_id}"
 
 
 def handle_inventory_event(payload: dict, db: Session):
@@ -65,6 +70,54 @@ def handle_inventory_event(payload: dict, db: Session):
         logger.info(
             "Order moved to AWAITING_PAYMENT",
             extra={"correlation_id": correlation_id, "order_id": order_id},
+        )
+
+        # 🔒 BUSINESS IDEMPOTENCY: emit payment request ONCE
+        payment_key = _payment_request_key(order_id)
+
+        already_requested = (
+            db.query(OrdersProcessedEvent)
+            .filter_by(
+                stream_name="payment_request",
+                event_id=payment_key,
+            )
+            .first()
+        )
+
+        if already_requested:
+            logger.warning(
+                "Payment already requested, skipping",
+                extra={
+                    "correlation_id": correlation_id,
+                    "order_id": order_id,
+                },
+            )
+            return
+
+        publish_event(
+            PAYMENT_COMMANDS_STREAM,
+            {
+                "type": "PaymentRequested",
+                "correlation_id": correlation_id,
+                "order_id": order_id,
+                "amount_paid": float(order.total_price),
+            },
+        )
+
+        db.add(
+            OrdersProcessedEvent(
+                stream_name="payment_request",
+                event_id=payment_key,
+            )
+        )
+        db.commit()
+
+        logger.info(
+            "PaymentRequested emitted",
+            extra={
+                "correlation_id": correlation_id,
+                "order_id": order_id,
+            },
         )
         return
 
